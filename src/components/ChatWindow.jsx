@@ -8,6 +8,8 @@ export default function ChatWindow() {
   const [userId, setUserId] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
+  let base_url = 'https://b27d-120-72-93-46.ngrok-free.app' || 'http://localhost:3000';
+
   const sendMessage = async () => {
     if (!input.trim()) return;
 
@@ -22,7 +24,7 @@ export default function ChatWindow() {
       // 🔐 If no user, register first
       if (!storedId) {
         const randomEmail = `user-${uuidv4()}@gmail.com`;
-        const signupRes = await axios.post('http://localhost:3000/api/v1/auth/signup', {
+        const signupRes = await axios.post(`${base_url}/api/v1/auth/signup`, {
           email: randomEmail,
           password: 'Vikram@gmail#',
         });
@@ -35,7 +37,7 @@ export default function ChatWindow() {
       }
 
       // 🧠 Send message to backend
-      const res = await axios.post('http://localhost:3000/api/v1/message', {
+      const res = await axios.post(`${base_url}/api/v1/message`, {
         userId: userId || storedId,
         message: input,
       });
