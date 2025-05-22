@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { io } from 'socket.io-client';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 
-export default function ChatWindow() {
+export default function ChatWindow({ onNewBatch }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [userId, setUserId] = useState('');
@@ -15,15 +15,14 @@ export default function ChatWindow() {
   const base_url = 'http://localhost:3000';
 
   useEffect(() => {
-    const newSocket = io(base_url, {
-      transports: ['websocket'],
-    });
+    const newSocket = io(base_url, { transports: ['websocket'] });
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
       console.log('Socket connected:', newSocket.id);
     });
 
+    // ----- ONE-SHOT replies -----
     newSocket.on('agent_response', async (data) => {
       console.log('Agent Response:', data);
       const systemMsg = {
@@ -35,10 +34,10 @@ export default function ChatWindow() {
       setMessages((prev) => [...prev, systemMsg]);
       setIsTyping(false);
 
-      // Fetch updated valence history
+      const storedId = sessionStorage.getItem('user_id') || data.user_id;
       try {
         const res = await axios.get(`${base_url}/api/v1/valence/history`, {
-          params: { userId: data.user_id, limit: 3 }
+          params: { userId: storedId, limit: 3 },
         });
         setValenceHistory(res.data.history);
       } catch (err) {
@@ -46,6 +45,61 @@ export default function ChatWindow() {
       }
     });
 
+    // ----- STREAMING replies -----
+    let isFirstChunk = true;
+    newSocket.on('agent_stream', (chunk) => {
+      console.log('Agent chunk:', chunk);
+      setMessages((prev) => {
+        if (isFirstChunk) {
+          isFirstChunk = false;
+          return [
+            ...prev,
+            {
+              role: 'system',
+              content: chunk.message,
+              agent: chunk.agent,
+              mental_model: chunk.mental_model || '',
+            },
+          ];
+        }
+        // append to last system message
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        updated[updated.length - 1] = {
+          ...last,
+          content: last.content + chunk.message,
+        };
+        return updated;
+      });
+    });
+
+    newSocket.on('agent_stream_complete', () => {
+      console.log('Agent stream complete');
+      setIsTyping(false);
+      const storedId = sessionStorage.getItem('user_id');
+      axios
+        .get(`${base_url}/api/v1/valence/history`, {
+          params: { userId: storedId, limit: 3 },
+        })
+        .then((res) => setValenceHistory(res.data.history))
+        .catch((err) =>
+          console.error('Failed to fetch valence history after stream:', err)
+        );
+    });
+
+    newSocket.on('agent_stream_error', (err) => {
+      console.error('Stream error:', err);
+      setIsTyping(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: '❌ Stream failed. Please try again.',
+        },
+      ]);
+    });
+
+    // ----- generic socket error -----
     newSocket.on('error', (error) => {
       console.error('Socket error:', error);
       setMessages((prev) => [
@@ -87,9 +141,10 @@ export default function ChatWindow() {
       }
 
       const finalUserId = userId || storedId;
-      if (socket) {
-        socket.emit('user_message', { userId: finalUserId, message: input });
-      }
+      socket?.emit('user_message', { userId: finalUserId, message: input });
+
+      // Trigger new batch on dashboard
+      onNewBatch();
     } catch (error) {
       console.error('Message error:', error.message);
       setMessages((prev) => [
@@ -110,7 +165,9 @@ export default function ChatWindow() {
         <div className="mb-4 p-2 border rounded">
           <h4 className="text-xs text-gray-600 mb-1">Recent Mood</h4>
           <ResponsiveContainer width="100%" height={50}>
-            <LineChart data={valenceHistory.map((v, i) => ({ index: i, value: v }))}>
+            <LineChart
+              data={valenceHistory.map((v, i) => ({ index: i, value: v }))}
+            >
               <Line type="monotone" dataKey="value" dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -122,11 +179,14 @@ export default function ChatWindow() {
           <div
             key={i}
             className={`text-sm p-2 rounded max-w-[80%] ${
-              msg.role === 'user' ? 'ml-auto bg-blue-100 text-right' : 'bg-gray-100'
+              msg.role === 'user'
+                ? 'ml-auto bg-blue-100 text-right'
+                : 'bg-gray-100'
             }`}
           >
             <div>
-              <strong>{msg.role === 'user' ? 'You' : 'System'}:</strong> {msg.content}
+              <strong>{msg.role === 'user' ? 'You' : 'System'}:</strong>{' '}
+              {msg.content}
             </div>
             {msg.agent && (
               <div className="text-xs text-gray-500 mt-1 italic">
@@ -136,7 +196,11 @@ export default function ChatWindow() {
             )}
           </div>
         ))}
-        {isTyping && <div className="text-xs italic text-gray-400">System is typing...</div>}
+        {isTyping && (
+          <div className="text-xs italic text-gray-400">
+            System is thinking...
+          </div>
+        )}
       </div>
 
       <div className="flex">

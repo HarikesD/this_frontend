@@ -1,18 +1,26 @@
-import ChatWindow from './components/ChatWindow';
-import MonitoringDashboard from './components/MonitoringDashboard';
 
+import React, { useState } from 'react';
+import MonitoringDashboard from './components/MonitoringDashboard';
+import ChatWindow from './components/ChatWindow';
 
 function App() {
+  // increments whenever ChatWindow sends a message
+  const [batchTrigger, setBatchTrigger] = useState(0);
+
+  const handleNewBatch = () => {
+    setBatchTrigger(prev => prev + 1);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-    {/* 1. Monitoring dashboard at the top */}
-    <MonitoringDashboard />
+      {/* 1. Pass batchTrigger so dashboard starts a new row */}
+      <MonitoringDashboard batchTrigger={batchTrigger} />
 
-    {/* 2. Your existing chat area below */}
-    <div className="mt-8 px-4">
-      <ChatWindow />
+      
+      <div className="mt-8 px-4">
+        <ChatWindow onNewBatch={handleNewBatch} />
+      </div>
     </div>
-  </div>
   );
 }
 
